@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AI Code Review</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2em; }
+    textarea { width: 100%; height: 200px; }
+    button { margin-top: 1em; padding: 0.5em 1em; }
+    pre { background: #f4f4f4; padding: 1em; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>AI Code Review</h1>
+  <textarea id="code" placeholder="Paste your code here..."></textarea><br />
+  <button onclick="reviewCode()">Review Code</button>
+  <h2>Review Output</h2>
+  <pre id="output"></pre>
+
+  <script>
+    async function reviewCode() {
+      const code = document.getElementById('code').value;
+      const output = document.getElementById('output');
+      output.textContent = "⏳ Reviewing code...";
+
+      try {
+        const response = await fetch('/review-text', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code })
+        });
+
+        const result = await response.json();
+
+        if (result.summary) {
+          output.textContent =
+            "Summary:\n" + result.summary + "\n\n" +
+            "Issues:\n- " + result.issues.join("\n- ") + "\n\n" +
+            "Recommendations:\n- " + result.recommendations.join("\n- ");
+        } else {
+          output.textContent = "⚠️ No summary returned.";
+        }
+      } catch (err) {
+        output.textContent = "❌ Error: " + err.message;
+      }
+    }
+  </script>
+</body>
+</html>
