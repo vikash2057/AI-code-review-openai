@@ -21,9 +21,11 @@ app.get('/', (req, res) => {
 });
 
 app.post('/github-webhook', async (req, res) => {
-  console.log("pull testing for code review")
+  console.log("Pull testing");
   const event = req.headers['x-github-event'];
   const action = req.body.action;
+
+  console.log(`📥 GitHub Webhook Event: ${event}, Action: ${action}`);
 
   if (event === 'pull_request' && action === 'opened') {
     const pr = req.body.pull_request;
@@ -42,16 +44,23 @@ app.post('/github-webhook', async (req, res) => {
       });
 
       const files = filesRes.data;
+      console.log(`📄 Found ${files.length} file(s) in PR`);
+
+      const filteredFiles = files.filter(f => f.patch);
+      if (filteredFiles.length === 0) {
+        console.log('⚠️ No code files with patches to review.');
+        return res.sendStatus(200);
+      }
 
       // STEP 2: AI review each file
       const reviewResults = await Promise.all(
-        files
-          .filter(file => file.patch) // Skip binary or unchanged files
-          .map(async (file) => {
-            const prompt = `Please review the following code diff:\n\n${file.patch}\n\nGive suggestions, improvements, or highlight any issues.`;
+        filteredFiles.map(async (file) => {
+          console.log(`🤖 Reviewing file: ${file.filename}`);
+          const prompt = `Please review the following code diff:\n\n${file.patch}\n\nGive suggestions, improvements, or highlight any issues.`;
 
+          try {
             const response = await openai.chat.completions.create({
-              model: "gpt-4o", // or "gpt-3.5-turbo" for cheaper review
+              model: "gpt-4o",
               messages: [
                 {
                   role: "system",
@@ -68,22 +77,29 @@ app.post('/github-webhook', async (req, res) => {
               filename: file.filename,
               feedback: response.choices[0].message.content
             };
-          })
+          } catch (err) {
+            console.error(`❌ OpenAI error on ${file.filename}:`, err.response?.data || err.message);
+            return {
+              filename: file.filename,
+              feedback: "⚠️ Could not analyze this file due to an AI error."
+            };
+          }
+        })
       );
 
       // STEP 3: Combine and post comment to PR
-      const body = reviewResults.map(r => `### 💡 \`${r.filename}\`\n${r.feedback}`).join('\n\n');
+      const commentBody = reviewResults.map(r => `### 💡 Review for \`${r.filename}\`\n${r.feedback}`).join('\n\n');
 
-      await axios.post(`${pr.url}/comments`, { body }, {
+      const commentRes = await axios.post(`${pr.url}/comments`, { body: commentBody }, {
         headers: {
           Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
           Accept: 'application/vnd.github+json'
         }
       });
 
-      console.log(`✅ AI feedback posted to PR #${prNumber}`);
+      console.log(`✅ AI feedback posted to PR #${prNumber} 🎉`, commentRes.statusText);
     } catch (err) {
-      console.error('❌ Error reviewing PR:', err.message);
+      console.error('❌ GitHub/Webhook error:', err.response?.data || err.message);
     }
   }
 
