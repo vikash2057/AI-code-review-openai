@@ -1,4 +1,3 @@
-let userName = "admin";
-function printName() {
-    console.log(userName);
-}
+const fs = require('fs');
+const data = fs.readFileSync('data.txt');
+console.log(data.toString());
