@@ -1,3 +1,4 @@
-function sum(a,b){
-    return a+b;
+userName = "admin";
+function printName() {
+    console.log(userName);
 }
