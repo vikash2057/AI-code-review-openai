@@ -16,12 +16,18 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+// Get list of reviewable files from .env
+const REVIEW_FILES = process.env.REVIEW_FILES
+  ? process.env.REVIEW_FILES.split(',').map(f => f.trim())
+  : [];
+
 app.get('/', (req, res) => {
   res.send('AI Code Review Webhook Server is running');
 });
 
 app.post('/github-webhook', async (req, res) => {
   console.log("Pull testing for review");
+
   const event = req.headers['x-github-event'];
   const action = req.body.action;
 
@@ -35,6 +41,7 @@ app.post('/github-webhook', async (req, res) => {
     console.log(`🔔 Pull request #${prNumber} opened in ${repo.full_name}`);
 
     try {
+      // STEP 1: Fetch code diffs from PR
       const filesRes = await axios.get(`${pr.url}/files`, {
         headers: {
           Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
@@ -45,16 +52,21 @@ app.post('/github-webhook', async (req, res) => {
       const files = filesRes.data;
       console.log(`📄 Found ${files.length} file(s) in PR`);
 
-      const filteredFiles = files.filter(f => f.filename.endsWith('test.js') && f.patch);
+      // Filter files by patch and filename (if REVIEW_FILES is set)
+      const filteredFiles = files.filter(f =>
+        f.patch && (REVIEW_FILES.length === 0 || REVIEW_FILES.includes(f.filename))
+      );
+
       if (filteredFiles.length === 0) {
-        console.log('⚠️ No reviewable files matched criteria.');
+        console.log('⚠️ No matching code files to review.');
         return res.sendStatus(200);
       }
 
+      // STEP 2: AI review each file
       const reviewResults = await Promise.all(
         filteredFiles.map(async (file) => {
           console.log(`🤖 Reviewing file: ${file.filename}`);
-          const prompt = `You're reviewing this code diff:\n\n${file.patch}\n\nGive brief, casual suggestions or issues. Use short bullet points.`;
+          const prompt = `Please review the following code diff:\n\n${file.patch}\n\nGive suggestions, improvements, or highlight any issues.`;
 
           try {
             const response = await openai.chat.completions.create({
@@ -62,7 +74,7 @@ app.post('/github-webhook', async (req, res) => {
               messages: [
                 {
                   role: "system",
-                  content: "You're a friendly senior developer. Keep code review feedback short, casual, and to the point. No intros, no formality. Use emojis lightly if helpful."
+                  content: "You are a senior software engineer reviewing pull request diffs."
                 },
                 {
                   role: "user",
@@ -85,16 +97,21 @@ app.post('/github-webhook', async (req, res) => {
         })
       );
 
-      const commentBody = reviewResults.map(r => `**${r.filename}**\n${r.feedback}`).join('\n\n');
+      // STEP 3: Combine and post comment to PR
+      const commentBody = reviewResults.map(r => `### 💡 Review for \`${r.filename}\`\n${r.feedback}`).join('\n\n');
 
-      const commentRes = await axios.post(`${pr.url}/comments`, { body: commentBody }, {
+      await axios.post(`${pr.url}/reviews`, {
+        body: commentBody,
+        event: "COMMENT"
+      }, {
         headers: {
           Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
           Accept: 'application/vnd.github+json'
         }
       });
 
-      console.log(`✅ AI feedback posted to PR #${prNumber} 🎉`, commentRes.statusText);
+
+      console.log(`✅ AI feedback posted to PR #${prNumber} 🎉`);
     } catch (err) {
       console.error('❌ GitHub/Webhook error:', err.response?.data || err.message);
     }
