@@ -87,12 +87,16 @@ app.post('/github-webhook', async (req, res) => {
 
       const commentBody = reviewResults.map(r => `**${r.filename}**\n${r.feedback}`).join('\n\n');
 
-      const commentRes = await axios.post(`${pr.url}/comments`, { body: commentBody }, {
+      const commentRes = await axios.post(`${pr.url}/reviews`, {
+        body: commentBody,
+        event: 'COMMENT'
+      }, {
         headers: {
           Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
           Accept: 'application/vnd.github+json'
         }
       });
+
 
       console.log(`✅ AI feedback posted to PR #${prNumber} 🎉`, commentRes.statusText);
     } catch (err) {
