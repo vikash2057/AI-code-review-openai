@@ -1,4 +1,4 @@
-userName = "admin";
+let userName = "admin";
 function printName() {
     console.log(userName);
 }
