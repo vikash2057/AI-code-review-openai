@@ -21,7 +21,7 @@ app.get('/', (req, res) => {
 });
 
 app.post('/github-webhook', async (req, res) => {
-  console.log("Pull testing for review3");
+  console.log("Pull testing for review4");
   const event = req.headers['x-github-event'];
   const action = req.body.action;
 
