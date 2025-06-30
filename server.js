@@ -16,12 +16,18 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+// Get list of reviewable files from .env
+const REVIEW_FILES = process.env.REVIEW_FILES
+  ? process.env.REVIEW_FILES.split(',').map(f => f.trim())
+  : [];
+
 app.get('/', (req, res) => {
   res.send('AI Code Review Webhook Server is running');
 });
 
 app.post('/github-webhook', async (req, res) => {
-  console.log("Pull testing for review4");
+  console.log("Pull testing for review");
+
   const event = req.headers['x-github-event'];
   const action = req.body.action;
 
@@ -46,9 +52,13 @@ app.post('/github-webhook', async (req, res) => {
       const files = filesRes.data;
       console.log(`📄 Found ${files.length} file(s) in PR`);
 
-      const filteredFiles = files.filter(f => f.patch);
+      // Filter files by patch and filename (if REVIEW_FILES is set)
+      const filteredFiles = files.filter(f =>
+        f.patch && (REVIEW_FILES.length === 0 || REVIEW_FILES.includes(f.filename))
+      );
+
       if (filteredFiles.length === 0) {
-        console.log('⚠️ No code files with patches to review.');
+        console.log('⚠️ No matching code files to review.');
         return res.sendStatus(200);
       }
 
@@ -90,14 +100,18 @@ app.post('/github-webhook', async (req, res) => {
       // STEP 3: Combine and post comment to PR
       const commentBody = reviewResults.map(r => `### 💡 Review for \`${r.filename}\`\n${r.feedback}`).join('\n\n');
 
-      const commentRes = await axios.post(`${pr.url}/comments`, { body: commentBody }, {
+      await axios.post(`${pr.url}/reviews`, {
+        body: commentBody,
+        event: "COMMENT"
+      }, {
         headers: {
           Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
           Accept: 'application/vnd.github+json'
         }
       });
 
-      console.log(`✅ AI feedback posted to PR #${prNumber} 🎉`, commentRes.statusText);
+
+      console.log(`✅ AI feedback posted to PR #${prNumber} 🎉`);
     } catch (err) {
       console.error('❌ GitHub/Webhook error:', err.response?.data || err.message);
     }
