@@ -1,4 +1,2 @@
-userName="sdfd"
-const fs = require('fs');
-const data = fs.readFileSync('data.txt');
-console.log(data.toString());
+userName="dfd";
+console.log("dfdf")
