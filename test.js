@@ -1,3 +1,4 @@
-userName="dfd";
-console.log("dfdf")
-let a=10;
+userName="sdfd"
+const fs = require('fs');
+const data = fs.readFileSync('data.txt');
+console.log(data.toString())
