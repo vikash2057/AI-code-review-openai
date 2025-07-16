@@ -72,7 +72,7 @@ You're reviewing this code diff:
 ${file.patch}
 
 1. Provide a brief, casual code review with short bullet points.
-2. If there are issues, give corrected code snippets.
+2. Then, if there are issues, give the corrected version of the code snippet based on the patch.
 3. Then, **perform a basic security audit**: point out any security vulnerabilities like SQL injection, XSS, command injection, hardcoded secrets, unsafe input handling, etc.
 4. Suggest secure alternatives for each vulnerability found.
 
