@@ -2,5 +2,6 @@ email="sdfd"
 const fs = require('fs');
 const data = fs.readFileSync('data.txt');
 console.log(data.toString())
-const query = "SELECT * FROM users WHERE email = '" + email + "'";
+const hash = location.hash.substring(1);
+document.getElementById("output").innerHTML = hash;
 
