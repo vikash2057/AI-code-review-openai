@@ -2,9 +2,18 @@ import express from "express";
 import axios from "axios";
 import cors from "cors";
 import dotenv from "dotenv";
+import fs from "fs";
+
 import OpenAI from "openai";
 
 dotenv.config();
+
+
+function extractCorrectedCode(aiText) {
+  const match = aiText.match(/```(?:js)?\n?([\s\S]*?)```/);
+  return match ? match[1].trim() : null;
+}
+
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -46,9 +55,8 @@ app.post("/github-webhook", async (req, res) => {
       console.log(`📄 Found ${files.length} file(s) in PR`);
 
       const filteredFiles = files.filter(
-        (f) => f.filename.endsWith("test.js") && f.contents_url
+        (f) => f.filename.endsWith("test.js") && f.patch
       );
-
       if (filteredFiles.length === 0) {
         console.log("⚠️ No reviewable files matched criteria.");
         return res.sendStatus(200);
@@ -57,35 +65,30 @@ app.post("/github-webhook", async (req, res) => {
       const reviewResults = await Promise.all(
         filteredFiles.map(async (file) => {
           console.log(`🤖 Reviewing file: ${file.filename}`);
+          //const prompt = `You're reviewing this code diff:\n\n${file.patch}\n\nGive brief, casual suggestions or issues. Use short bullet points.`;
+          // const prompt = `
+          //     You're reviewing this code diff:
 
-          // 🔄 Step 1: Fetch full file content from GitHub
-          const contentRes = await axios.get(file.contents_url, {
-            headers: {
-              Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
-              Accept: "application/vnd.github+json",
-            },
-          });
+          //     ${file.patch}
 
-          const fullContent = Buffer.from(
-            contentRes.data.content,
-            "base64"
-          ).toString("utf-8");
+          //     1. First, provide a brief, casual code review with short bullet points.
+          //     2. Then, if there are issues, give the corrected version of the code snippet based on the patch. If no correction is needed, just write "✅ No corrections needed."
+          //     `;
 
-          // 🔍 Step 2: Construct AI prompt
           const prompt = `
-You're reviewing this full source code file:
+You're reviewing this code diff:
 
-${fullContent}
+${file.patch}
 
-1. Provide a brief, casual code review (syntax, quality, error handling, naming, etc.).
-2. Suggest corrected code snippets if needed.
-3. Then, perform a basic security audit: SQL injection, XSS, hardcoded secrets, command injection, etc.
-4. Suggest secure alternatives for any vulnerabilities.
+1. Provide a brief, casual code review with short bullet points.
+2. Then, if there are issues, give the corrected version of the code snippet based on the patch.
+3. Then, **perform a basic security audit**: point out any security vulnerabilities like SQL injection, XSS, command injection, hardcoded secrets, unsafe input handling, etc.
+4. Suggest secure alternatives for each vulnerability found.
 
-If everything is fine, say "✅ Looks good!".
+If no issues are found, just write "✅ No major security risks detected."
 `;
 
-          // 🤖 Step 3: Call OpenAI
+
           try {
             const response = await openai.chat.completions.create({
               model: "gpt-4o",
@@ -93,7 +96,7 @@ If everything is fine, say "✅ Looks good!".
                 {
                   role: "system",
                   content:
-                    "You're a friendly senior developer. Review code helpfully and clearly. Keep comments short and useful.",
+                    "You're a friendly senior developer. Keep code review feedback short, casual, and to the point. No intros, no formality. Use emojis lightly if helpful.",
                 },
                 {
                   role: "user",
@@ -119,7 +122,6 @@ If everything is fine, say "✅ Looks good!".
         })
       );
 
-      // 📝 Post Review Back to GitHub PR
       const commentBody = reviewResults
         .map((r) => `**${r.filename}**\n${r.feedback}`)
         .join("\n\n");
