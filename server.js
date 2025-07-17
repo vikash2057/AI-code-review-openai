@@ -3,17 +3,15 @@ import axios from "axios";
 import cors from "cors";
 import dotenv from "dotenv";
 import fs from "fs";
-
+import path from "path";
 import OpenAI from "openai";
 
 dotenv.config();
-
 
 function extractCorrectedCode(aiText) {
   const match = aiText.match(/```(?:js)?\n?([\s\S]*?)```/);
   return match ? match[1].trim() : null;
 }
-
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -65,29 +63,19 @@ app.post("/github-webhook", async (req, res) => {
       const reviewResults = await Promise.all(
         filteredFiles.map(async (file) => {
           console.log(`🤖 Reviewing file: ${file.filename}`);
-          //const prompt = `You're reviewing this code diff:\n\n${file.patch}\n\nGive brief, casual suggestions or issues. Use short bullet points.`;
-          // const prompt = `
-          //     You're reviewing this code diff:
-
-          //     ${file.patch}
-
-          //     1. First, provide a brief, casual code review with short bullet points.
-          //     2. Then, if there are issues, give the corrected version of the code snippet based on the patch. If no correction is needed, just write "✅ No corrections needed."
-          //     `;
 
           const prompt = `
 You're reviewing this code diff:
 
 ${file.patch}
 
-1. Provide a brief, casual code review with short bullet points.
-2. Then, if there are issues, give the corrected version of the code snippet based on the patch.
-3. Then, **perform a basic security audit**: point out any security vulnerabilities like SQL injection, XSS, command injection, hardcoded secrets, unsafe input handling, etc.
-4. Suggest secure alternatives for each vulnerability found.
+1. Provide a brief, casual code review (syntax, quality, error handling, naming, etc.).
+2. Suggest corrected code snippets if needed.
+3. Then, perform a basic security audit: SQL injection, XSS, hardcoded secrets, command injection, etc.
+4. Suggest secure alternatives for any vulnerabilities.
 
 If no issues are found, just write "✅ No major security risks detected."
 `;
-
 
           try {
             const response = await openai.chat.completions.create({
@@ -105,9 +93,25 @@ If no issues are found, just write "✅ No major security risks detected."
               ],
             });
 
+            const aiContent = response.choices[0].message.content;
+            const correctedCode = extractCorrectedCode(aiContent);
+
+            if (correctedCode && file.filename.endsWith("test.js")) {
+              const testFilePath = path.join(process.cwd(), "test.js");
+              try {
+                fs.writeFileSync(testFilePath + ".bak", fs.readFileSync(testFilePath, "utf8")); // Backup
+                fs.writeFileSync(testFilePath, correctedCode, "utf8");
+                console.log(`✅ test.js updated with corrected code at ${testFilePath}`);
+              } catch (err) {
+                console.error("❌ Failed to update test.js:", err.message);
+              }
+            } else {
+              console.log("⚠️ No corrected code found or filename mismatch.");
+            }
+
             return {
               filename: file.filename,
-              feedback: response.choices[0].message.content,
+              feedback: aiContent,
             };
           } catch (err) {
             console.error(
