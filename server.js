@@ -9,20 +9,15 @@ import OpenAI from "openai";
 dotenv.config();
 
 function extractCorrectedCode(aiText) {
-  const blocks = [...aiText.matchAll(/```(?:\w+)?\n([\s\S]*?)```/g)];
+  const blocks = [...aiText.matchAll(/```(?:[a-zA-Z]+)?\n([\s\S]*?)```/g)];
   if (!blocks || blocks.length === 0) return null;
 
-  // Combine all code blocks (e.g., main fix + XSS fix)
-  const allCode = blocks
-    .map((b) => {
-      const lines = b[1].split("\n");
-      return lines[0].trim().toLowerCase() === "javascript"
-        ? lines.slice(1).join("\n")
-        : lines.join("\n");
-    })
-    .join("\n\n");
-
-  return allCode.trim();
+  // Pick the longest code block (assuming it's the full corrected file)
+  const longest = blocks.reduce((a, b) => (a[1].length > b[1].length ? a : b));
+  const lines = longest[1].split("\n");
+  return lines[0].trim().toLowerCase() === "javascript"
+    ? lines.slice(1).join("\n")
+    : lines.join("\n");
 }
 
 const app = express();
@@ -65,8 +60,9 @@ app.post("/github-webhook", async (req, res) => {
       console.log(`📄 Found ${files.length} file(s) in PR`);
 
       const filteredFiles = files.filter(
-        (f) => f.filename.endsWith("test.js") && f.patch
+        (f) => f.filename.endsWith("test.js") && f.status !== "removed"
       );
+
       if (filteredFiles.length === 0) {
         console.log("⚠️ No reviewable files matched criteria.");
         return res.sendStatus(200);
@@ -76,17 +72,27 @@ app.post("/github-webhook", async (req, res) => {
         filteredFiles.map(async (file) => {
           console.log(`🤖 Reviewing file: ${file.filename}`);
 
+          const rawFile = await axios.get(file.contents_url, {
+            headers: {
+              Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+              Accept: "application/vnd.github+json",
+            },
+          });
+
+          const fileContent = Buffer.from(rawFile.data.content, "base64").toString("utf8");
+
           const prompt = `
-You're reviewing this code diff:
+You're reviewing the following full JavaScript code:
 
-${file.patch}
+\`\`\`js
+${fileContent}
+\`\`\`
 
-1. Provide a brief, casual code review (syntax, quality, error handling, naming, etc.).
-2. Suggest corrected code snippets if needed.
-3. Then, perform a basic security audit: SQL injection, XSS, hardcoded secrets, command injection, etc.
-4. Suggest secure alternatives for any vulnerabilities.
+1. Provide a short code review (syntax, quality, structure, error handling).
+2. Point out security issues (XSS, SQL injection, secrets, etc.)
+3. Then give a fully corrected and secure version of the entire file.
 
-If no issues are found, just write "✅ No major security risks detected."
+Respond with one or more \`\`\`js code blocks\`\`\`.
 `;
 
           try {
@@ -96,7 +102,7 @@ If no issues are found, just write "✅ No major security risks detected."
                 {
                   role: "system",
                   content:
-                    "You're a friendly senior developer. Keep code review feedback short, casual, and to the point. No intros, no formality. Use emojis lightly if helpful.",
+                    "You're a friendly senior developer. Keep review feedback short and clear. Suggest security and code improvements. Use code blocks for corrected version.",
                 },
                 {
                   role: "user",
@@ -142,7 +148,7 @@ If no issues are found, just write "✅ No major security risks detected."
         .map((r) => `**${r.filename}**\n${r.feedback}`)
         .join("\n\n");
 
-      const commentRes = await axios.post(
+      await axios.post(
         `${pr.url}/reviews`,
         {
           body: commentBody,
@@ -156,10 +162,7 @@ If no issues are found, just write "✅ No major security risks detected."
         }
       );
 
-      console.log(
-        `✅ AI feedback posted to PR #${prNumber} 🎉`,
-        commentRes.statusText
-      );
+      console.log(`✅ AI feedback posted to PR #${prNumber} 🎉`);
     } catch (err) {
       console.error(
         "❌ GitHub/Webhook error:",
