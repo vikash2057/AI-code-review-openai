@@ -1,8 +1,18 @@
-email="sdfd"
+const email = "sdfd"; // Use const if the value won’t change
+
 const fs = require('fs');
-const data = fs.readFileSync('data.txt');
-console.log(data.toString())
+
+try {
+    const data = fs.readFileSync('data.txt');
+    console.log(data.toString());
+} catch (error) {
+    console.error('Error reading file:', error.message);
+}
+
 const hash = location.hash.substring(1);
-document.getElementById("output").innerHTML = hash;
-console.log("111");
+
+// Sanitize hash to prevent XSS
+const sanitizedHash = hash.replace(/[<>\"\'\/]/g, '');
+document.getElementById("output").textContent = sanitizedHash; // Use textContent to avoid XSS
+
 console.log("111");
