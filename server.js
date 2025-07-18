@@ -11,13 +11,32 @@ dotenv.config();
 function extractCorrectedCode(aiText) {
   const blocks = [...aiText.matchAll(/```(?:[a-zA-Z]+)?\n([\s\S]*?)```/g)];
   if (!blocks.length) return null;
-  // choose the longest — the full corrected file
   const longest = blocks.reduce((a, b) => (a[1].length > b[1].length ? a : b));
   let code = longest[1];
-  // strip a leading "javascript" line if present
   const lines = code.split("\n");
   if (lines[0].trim().toLowerCase() === "javascript") lines.shift();
   return lines.join("\n").trim();
+}
+
+function getGenericReviewPrompt(filename, code) {
+  return `You are a senior software engineer performing a code quality and security audit on the file "${filename}".
+
+Please check the following generic criteria:
+
+1. **Naming & Structure**  - Clear, meaningful names; no unused variables/functions.
+2. **Error Handling**  - All I/O operations have proper error handling.
+3. **Security Best Practices**  - Input validation/sanitization; no hard-coded secrets.
+
+If the code meets all of the above criteria, respond with exactly:
+\`\`\`
+✅ No changes needed
+\`\`\`
+(with no additional explanation).
+Otherwise, list any issues and then provide a full, corrected version of the file in one or more \`\`\`js code blocks\`\`\`.
+
+\`\`\`${filename.endsWith('.js') ? 'js' : ''}
+${code}
+\`\`\``;
 }
 
 const app = express();
@@ -57,7 +76,6 @@ app.post("/github-webhook", async (req, res) => {
         .map(async file => {
           console.log(`🤖 Reviewing ${file.filename}`);
 
-          // 1) fetch full content
           const raw = await axios.get(file.contents_url, {
             headers: {
               Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
@@ -66,33 +84,13 @@ app.post("/github-webhook", async (req, res) => {
           });
           const original = Buffer.from(raw.data.content, "base64").toString("utf8");
 
-          // 2) build the prompt
-          const prompt = `
-You are a senior software engineer. Review this JavaScript file:
+          const prompt = getGenericReviewPrompt(file.filename, original);
 
-\`\`\`js
-${original}
-\`\`\`
-
-1. Give a short summary.
-2. List any bugs, concerns, error handling or security issues.
-3. Suggest improvements.
-4. **Remove any unused variables.**
-5. Then, if fixes are needed, provide the **entire corrected file** in one or more \`\`\`js code blocks\`\`\`;
-   if the code already follows best practices (error handling, security, etc.), respond with exactly:
-
-\`\`\`
-✅ No changes needed
-\`\`\`
-
-(with no code blocks).
-`;
-
-          // 3) call AI
           const aiResp = await openai.chat.completions.create({
             model: "gpt-4o",
+            temperature: 0,
             messages: [
-              { role: "system", content: "You're a helpful, precise senior developer." },
+              { role: "system", content: "You are a precise, consistent senior developer. Follow instructions exactly." },
               { role: "user", content: prompt },
             ]
           });
@@ -106,7 +104,6 @@ ${original}
           } else {
             correctedCode = extractCorrectedCode(aiContent);
             if (correctedCode && correctedCode !== original) {
-              // backup & overwrite
               const fp = path.join(process.cwd(), "test.js");
               fs.writeFileSync(fp + ".bak", original, "utf8");
               fs.writeFileSync(fp, correctedCode, "utf8");
@@ -120,7 +117,6 @@ ${original}
         })
     );
 
-    // post review comment
     const body = reviewResults.map(r => `**${r.filename}**\n${r.feedback}`).join("\n\n");
     await axios.post(pr.url + "/reviews", {
       body, event: "COMMENT"
