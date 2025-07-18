@@ -98,8 +98,10 @@ app.post("/github-webhook", async (req, res) => {
           const aiContent = aiResp.choices[0].message.content.trim();
           let feedback = aiContent;
           let correctedCode = null;
-
-          if (aiContent === "✅ No changes needed") {
+			debugger;
+			console.log("aiContent");
+			console.log(aiContent);
+          if (aiContent === "✅ No changes needed" || aiContent.includes("No changes needed")) {
             console.log("ℹ️  No changes needed for test.js");
           } else {
             correctedCode = extractCorrectedCode(aiContent);
