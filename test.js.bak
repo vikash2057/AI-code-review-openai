@@ -1,7 +1,16 @@
-email="sdfd"
 const fs = require('fs');
-const data = fs.readFileSync('data.txt');
-console.log(data.toString())
+
+try {
+    const data = fs.readFileSync('data.txt');
+    console.log(data.toString());
+} catch (error) {
+    console.error('Error reading file:', error);
+}
+
 const hash = location.hash.substring(1);
-document.getElementById("output").innerHTML = hash;
-console.log("111");
+
+// Simple sanitization example: remove any script tags
+const sanitizedHash = hash.replace(/<script.*?>.*?<\/script>/gi, '');
+
+document.getElementById("output").innerHTML = sanitizedHash;
+console.log("Operation completed");

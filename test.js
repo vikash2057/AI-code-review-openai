@@ -7,10 +7,16 @@ try {
     console.error('Error reading file:', error);
 }
 
-const hash = location.hash.substring(1);
+const urlFragment = location.hash.substring(1);
 
-// Simple sanitization example: remove any script tags
-const sanitizedHash = hash.replace(/<script.*?>.*?<\/script>/gi, '');
+// Improved sanitization: remove potentially dangerous characters
+const sanitizedHash = urlFragment.replace(/[<>]/g, '');
 
-document.getElementById("output").innerHTML = sanitizedHash;
+const outputElement = document.getElementById("output");
+if (outputElement) {
+    outputElement.textContent = sanitizedHash; // Use textContent to avoid XSS
+} else {
+    console.error('Output element not found');
+}
+
 console.log("Operation completed");
