@@ -4,5 +4,3 @@ const data = fs.readFileSync('data.txt');
 console.log(data.toString())
 const hash = location.hash.substring(1);
 document.getElementById("output").innerHTML = hash;
-console.log("111");
-console.log("end of file")
