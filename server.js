@@ -9,9 +9,22 @@ import OpenAI from "openai";
 dotenv.config();
 
 function extractCorrectedCode(aiText) {
-  const match = aiText.match(/```(?:js)?\n?([\s\S]*?)```/);
-  return match ? match[1].trim() : null;
+  const blocks = [...aiText.matchAll(/```(?:\w+)?\n([\s\S]*?)```/g)];
+  if (!blocks || blocks.length === 0) return null;
+
+  // Combine all code blocks (e.g., main fix + XSS fix)
+  const allCode = blocks
+    .map((b) => {
+      const lines = b[1].split("\n");
+      return lines[0].trim().toLowerCase() === "javascript"
+        ? lines.slice(1).join("\n")
+        : lines.join("\n");
+    })
+    .join("\n\n");
+
+  return allCode.trim();
 }
+
 
 const app = express();
 const PORT = process.env.PORT || 5000;
