@@ -1,122 +1,176 @@
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import OpenAI from 'openai';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import express from "express";
+import axios from "axios";
+import cors from "cors";
+import dotenv from "dotenv";
+import fs from "fs";
+import path from "path";
+import OpenAI from "openai";
 
 dotenv.config();
+
+function extractCorrectedCode(aiText) {
+  const blocks = [...aiText.matchAll(/```(?:\w+)?\n([\s\S]*?)```/g)];
+  if (!blocks || blocks.length === 0) return null;
+
+  // Combine all code blocks (e.g., main fix + XSS fix)
+  const allCode = blocks
+    .map((b) => {
+      const lines = b[1].split("\n");
+      return lines[0].trim().toLowerCase() === "javascript"
+        ? lines.slice(1).join("\n")
+        : lines.join("\n");
+    })
+    .join("\n\n");
+
+  return allCode.trim();
+}
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
 
-// Serve static frontend files
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-app.use(express.static(path.join(__dirname, 'public')));
-
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const getPrompt = (code) => `
-You are a senior software engineer. Perform a brief code review with:
-- A short summary
-- Any bugs or concerns
-- 1–2 improvement suggestions
-
-Only respond in JSON:
-{
-  "summary": "...",
-  "issues": ["..."],
-  "recommendations": ["..."]
-}
-
-Code:
-\`\`\`
-${code}
-\`\`\`
-`;
-
-app.post('/review-text', async (req, res) => {
-  try {
-    const { code } = req.body;
-    const prompt = getPrompt(code);
-
-    const response = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      temperature: 0.3,
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    const text = response.choices[0].message.content.trim();
-
-    let json;
-    try {
-      json = JSON.parse(text);
-    } catch (err) {
-      console.error("❌ Failed to parse model response:", text);
-      return res.status(500).json({ error: "Model response was not valid JSON.", raw: text });
-    }
-
-    res.json(json);
-
-  } catch (error) {
-    console.error('❌ Error:', error.message);
-    res.status(500).json({ error: 'Failed to review code.' });
-  }
+app.get("/", (req, res) => {
+  res.send("AI Code Review Webhook Server is running");
 });
 
-// Optional fallback to serve index.html for unknown routes
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public/index.html'));
+app.post("/github-webhook", async (req, res) => {
+  console.log("Pull testing for review");
+  const event = req.headers["x-github-event"];
+  const action = req.body.action;
+
+  console.log(`📥 GitHub Webhook Event: ${event}, Action: ${action}`);
+
+  if (event === "pull_request" && action === "opened") {
+    const pr = req.body.pull_request;
+    const repo = req.body.repository;
+    const prNumber = pr.number;
+
+    console.log(`🔔 Pull request #${prNumber} opened in ${repo.full_name}`);
+
+    try {
+      const filesRes = await axios.get(`${pr.url}/files`, {
+        headers: {
+          Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+          Accept: "application/vnd.github+json",
+        },
+      });
+
+      const files = filesRes.data;
+      console.log(`📄 Found ${files.length} file(s) in PR`);
+
+      const filteredFiles = files.filter(
+        (f) => f.filename.endsWith("test.js") && f.patch
+      );
+      if (filteredFiles.length === 0) {
+        console.log("⚠️ No reviewable files matched criteria.");
+        return res.sendStatus(200);
+      }
+
+      const reviewResults = await Promise.all(
+        filteredFiles.map(async (file) => {
+          console.log(`🤖 Reviewing file: ${file.filename}`);
+
+          const prompt = `
+You're reviewing this code diff:
+
+${file.patch}
+
+1. Provide a brief, casual code review (syntax, quality, error handling, naming, etc.).
+2. Suggest corrected code snippets if needed.
+3. Then, perform a basic security audit: SQL injection, XSS, hardcoded secrets, command injection, etc.
+4. Suggest secure alternatives for any vulnerabilities.
+
+If no issues are found, just write "✅ No major security risks detected."
+`;
+
+          try {
+            const response = await openai.chat.completions.create({
+              model: "gpt-4o",
+              messages: [
+                {
+                  role: "system",
+                  content:
+                    "You're a friendly senior developer. Keep code review feedback short, casual, and to the point. No intros, no formality. Use emojis lightly if helpful.",
+                },
+                {
+                  role: "user",
+                  content: prompt,
+                },
+              ],
+            });
+
+            const aiContent = response.choices[0].message.content;
+            const correctedCode = extractCorrectedCode(aiContent);
+
+            if (correctedCode && file.filename.endsWith("test.js")) {
+              const testFilePath = path.join(process.cwd(), "test.js");
+              try {
+                fs.writeFileSync(testFilePath + ".bak", fs.readFileSync(testFilePath, "utf8")); // Backup
+                fs.writeFileSync(testFilePath, correctedCode, "utf8");
+                console.log(`✅ test.js updated with corrected code at ${testFilePath}`);
+              } catch (err) {
+                console.error("❌ Failed to update test.js:", err.message);
+              }
+            } else {
+              console.log("⚠️ No corrected code found or filename mismatch.");
+            }
+
+            return {
+              filename: file.filename,
+              feedback: aiContent,
+            };
+          } catch (err) {
+            console.error(
+              `❌ OpenAI error on ${file.filename}:`,
+              err.response?.data || err.message
+            );
+            return {
+              filename: file.filename,
+              feedback: "⚠️ Could not analyze this file due to an AI error.",
+            };
+          }
+        })
+      );
+
+      const commentBody = reviewResults
+        .map((r) => `**${r.filename}**\n${r.feedback}`)
+        .join("\n\n");
+
+      const commentRes = await axios.post(
+        `${pr.url}/reviews`,
+        {
+          body: commentBody,
+          event: "COMMENT",
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+            Accept: "application/vnd.github+json",
+          },
+        }
+      );
+
+      console.log(
+        `✅ AI feedback posted to PR #${prNumber} 🎉`,
+        commentRes.statusText
+      );
+    } catch (err) {
+      console.error(
+        "❌ GitHub/Webhook error:",
+        err.response?.data || err.message
+      );
+    }
+  }
+
+  res.sendStatus(200);
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ Server running at http://localhost:${PORT}`);
+  console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
-app.post('/webhook', express.json(), async (req, res) => {
-  const event = req.headers['x-github-event'];
-
-  if (event === 'pull_request' && ['opened', 'synchronize'].includes(req.body.action)) {
-    const pr = req.body.pull_request;
-    const repo = req.body.repository;
-    const files_url = pr.url + '/files';
-
-    const token = process.env.GITHUB_TOKEN; // needs repo read access
-
-    const response = await fetch(files_url, {
-      headers: {
-        'Authorization': `token ${token}`,
-        'Accept': 'application/vnd.github.v3+json',
-      }
-    });
-
-    const files = await response.json();
-
-    for (const file of files) {
-      if (file.status === 'modified' || file.status === 'added') {
-        const rawContent = await fetch(file.raw_url);
-        const code = await rawContent.text();
-
-        const aiResponse = await fetch('http://localhost:5000/review-text', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code })
-        });
-
-        const result = await aiResponse.json();
-
-        // You can now log this, or optionally post to PR via GitHub API
-        console.log(`Review for ${file.filename}:`, result);
-      }
-    }
-
-    res.status(200).send('Review complete');
-  } else {
-    res.status(200).send('No action taken');
-  }
-});
-
