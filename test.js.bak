@@ -1,8 +1,17 @@
-email="sdfd"
 const fs = require('fs');
-const data = fs.readFileSync('data.txt');
-console.log(data.toString())
+
+try {
+    const data = fs.readFileSync('data.txt');
+    console.log(data.toString());
+} catch (error) {
+    console.error('Error reading file:', error);
+}
+
 const hash = location.hash.substring(1);
-document.getElementById("output").innerHTML = hash;
-console.log("111");
-console.log("111");
+
+// Simple sanitization example to prevent XSS
+const sanitizeHTML = (str) => {
+    return str.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+};
+
+document.getElementById("output").innerHTML = sanitizeHTML(hash);
