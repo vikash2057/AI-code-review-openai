@@ -1,8 +1,21 @@
-email="sdfd"
 const fs = require('fs');
-const data = fs.readFileSync('data.txt');
-console.log(data.toString())
+
+try {
+    const data = fs.readFileSync('data.txt');
+    console.log(data.toString());
+} catch (error) {
+    console.error('Error reading file:', error);
+}
+
 const hash = location.hash.substring(1);
-document.getElementById("output").innerHTML = hash;
-console.log("111");
-console.log("111");
+
+// Simple sanitization example: encode HTML entities
+function sanitize(input) {
+    return input.replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+}
+
+document.getElementById("output").innerHTML = sanitize(hash);
