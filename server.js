@@ -52,9 +52,13 @@ app.get("/", (req, res) => res.send("AI Code Review Webhook Server is running"))
 app.post("/github-webhook", async (req, res) => {
   const event = req.headers["x-github-event"];
   const action = req.body.action;
-  if (event !== "pull_request" || action !== "opened") {
-    return res.sendStatus(200);
-  }
+ if (
+  event !== "pull_request" ||
+  !["opened", "synchronize", "reopened"].includes(action)
+) {
+  return res.sendStatus(200);
+}
+
 
   const pr = req.body.pull_request,
         prNumber = pr.number,
