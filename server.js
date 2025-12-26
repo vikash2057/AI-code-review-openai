@@ -51,6 +51,7 @@ app.get("/", (req, res) => res.send("AI Code Review Webhook Server is running"))
 
 app.post("/github-webhook", async (req, res) => {
   debugger;
+  console.log("Received webhook");
   const event = req.headers["x-github-event"];
   const action = req.body.action;
  if (
@@ -142,4 +143,4 @@ app.post("/github-webhook", async (req, res) => {
   res.sendStatus(200);
 });
 
-app.listen(PORT, () => console.log(`🚀 Listening on http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Listening AI code review on http://localhost:${PORT}`));
