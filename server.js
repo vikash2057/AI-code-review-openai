@@ -50,6 +50,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 app.get("/", (req, res) => res.send("AI Code Review Webhook Server is running"));
 
 app.post("/github-webhook", async (req, res) => {
+  debugger;
   const event = req.headers["x-github-event"];
   const action = req.body.action;
  if (
